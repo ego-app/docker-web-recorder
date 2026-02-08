@@ -42,6 +42,7 @@ async function main() {
       '--no-sandbox',
       '--disable-gpu',
       '--disable-setuid-sandbox',
+      '--disable-notifications',
       '--no-first-run',
       '--disable-dev-shm-usage',
       '--disable-default-apps',
