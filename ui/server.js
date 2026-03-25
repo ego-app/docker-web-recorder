@@ -257,6 +257,7 @@ app.listen(3000, () => {
   console.log('Web Recorder UI listening on http://localhost:3000');
   console.log(`Recorder image : ${RECORDER_IMAGE}`);
   console.log(`Recordings dir : ${RECORDINGS_DIR}`);
+  console.log(`Volume source  : ${volumeSource}`);
   if (RECORDINGS_VOLUME_NAME) {
     console.log(`Volume name    : ${RECORDINGS_VOLUME_NAME}`);
   }
