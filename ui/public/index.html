@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -388,7 +388,7 @@
 
   <div class="container">
     <div class="card">
-      <h2>New Recording</h2>
+      <h2>Nuova Registrazione</h2>
       <form @submit.prevent="startRecording" autocomplete="off">
         <div class="form-row">
           <div class="field grow">
@@ -396,11 +396,11 @@
             <input v-model="newUrl" type="url" placeholder="https://example.com" required>
           </div>
           <div class="field" style="width:130px">
-            <label>Duration (optional)</label>
-            <input v-model="newDuration" type="text" placeholder="e.g. 60">
+            <label>Durata (opzionale)</label>
+            <input v-model="newDuration" type="text" placeholder="es. 60">
           </div>
           <button type="submit" class="btn-primary" :disabled="submitting">
-            {{ submitting ? 'Starting\u2026' : 'Start recording' }}
+            {{ submitting ? 'Avvio\u2026' : 'Avvia registrazione' }}
           </button>
         </div>
         <div v-if="formError" class="form-error">{{ formError }}</div>
@@ -408,14 +408,14 @@
     </div>
 
     <div class="section-header">
-      <h2>Recordings</h2>
-      <span class="refresh-indicator">auto-refresh on</span>
+      <h2>Registrazioni</h2>
+      <span class="refresh-indicator">aggiornamento automatico attivo</span>
     </div>
 
     <div class="recordings-list">
       <div v-if="recordings.length === 0" class="empty-state">
         <p>&#9654;</p>
-        <p>No recordings yet. Start one above.</p>
+        <p>Nessuna registrazione. Avviarne una sopra.</p>
       </div>
 
       <div
@@ -428,9 +428,9 @@
           <div class="recording-info">
             <div class="recording-url" :title="r.url">{{ r.url }}</div>
             <div class="recording-meta">
-              <span>Started {{ fmt(r.startedAt) }}</span>
+              <span>Avviata {{ fmt(r.startedAt) }}</span>
               <span>{{ timeInfoFor(r) }}</span>
-              <span v-if="r.duration">Limit: {{ r.duration }}s</span>
+              <span v-if="r.duration">Limite: {{ r.duration }}s</span>
             </div>
           </div>
           <span class="badge" :class="`badge-${effectiveStatus(r)}`">
@@ -442,26 +442,26 @@
               class="btn-danger"
               :disabled="stoppingIds.has(r.id)"
               @click="stopRecording(r.id)"
-            >Stop</button>
+            >Ferma</button>
             <button
               v-if="r.downloadable"
               class="btn-download"
               @click="downloadRecording(r.id)"
-            >Download</button>
+            >Scarica</button>
             <button
               v-if="r.status === 'completed' || r.status === 'failed'"
               class="btn-delete"
               :disabled="deletingIds.has(r.id)"
               @click="deleteRecording(r.id)"
-            >Delete</button>
+            >Elimina</button>
             <button class="btn-logs" @click="toggleLogs(r.id)">
-              Logs {{ expandedLogs.has(r.id) ? '\u25b2' : '\u25bc' }}
+              Log {{ expandedLogs.has(r.id) ? '\u25b2' : '\u25bc' }}
             </button>
           </div>
         </div>
         <div v-show="expandedLogs.has(r.id)" class="log-panel">
           <div class="log-output" :ref="el => setLogOutputRef(r.id, el)">
-            <div v-if="getJobLogs(r.id).length === 0" class="log-empty">No output yet\u2026</div>
+            <div v-if="getJobLogs(r.id).length === 0" class="log-empty">Nessun output ancora\u2026</div>
             <div
               v-for="(line, idx) in getJobLogs(r.id)"
               :key="idx"
@@ -523,27 +523,30 @@ createApp({
 
     function badgeLabel(r) {
       const s = effectiveStatus(r);
-      if (s === 'starting') return 'Starting';
-      if (s === 'stopping') return 'Stopping';
+      if (s === 'starting') return 'Avvio';
+      if (s === 'stopping') return 'Arresto';
+      if (s === 'recording') return 'Registrazione';
+      if (s === 'completed') return 'Completata';
+      if (s === 'failed') return 'Errore';
       return s.charAt(0).toUpperCase() + s.slice(1);
     }
 
     function timeInfoFor(r) {
       if (r.status === 'recording') {
         return r.ffmpegStartedAt
-          ? `${elapsed(r.ffmpegStartedAt)} recording`
-          : 'Preparing environment\u2026';
+          ? `${elapsed(r.ffmpegStartedAt)} registrazione`
+          : 'Preparazione ambiente\u2026';
       }
       if (r.status === 'stopping') {
         return r.ffmpegStartedAt
-          ? `${elapsed(r.ffmpegStartedAt)} \u00b7 Finalizing\u2026`
-          : 'Finalizing\u2026';
+          ? `${elapsed(r.ffmpegStartedAt)} \u00b7 Finalizzazione\u2026`
+          : 'Finalizzazione\u2026';
       }
       if (r.completedAt) {
         const from = r.ffmpegStartedAt || r.startedAt;
-        return `${elapsed(from, r.completedAt)} recorded`;
+        return `${elapsed(from, r.completedAt)} registrata`;
       }
-      return `${elapsed(r.startedAt)} elapsed`;
+      return `${elapsed(r.startedAt)} trascorsi`;
     }
 
     function getJobLogs(id) {
@@ -626,7 +629,7 @@ createApp({
       formError.value = '';
       const url = newUrl.value.trim();
       const duration = newDuration.value.trim();
-      if (!url) { formError.value = 'URL is required.'; return; }
+      if (!url) { formError.value = 'URL obbligatorio.'; return; }
 
       submitting.value = true;
       try {
@@ -640,13 +643,13 @@ createApp({
         });
 
         const data = await r.json();
-        if (!r.ok) { formError.value = data.error || 'Failed to start recording.'; return; }
+        if (!r.ok) { formError.value = data.error || 'Avvio registrazione non riuscito.'; return; }
 
         newUrl.value = '';
         newDuration.value = '';
         await fetchRecordings();
       } catch {
-        formError.value = 'Network error. Is the server running?';
+        formError.value = 'Errore di rete. Il server è in esecuzione?';
       } finally {
         submitting.value = false;
       }
@@ -671,7 +674,7 @@ createApp({
     }
 
     async function deleteRecording(id) {
-      if (!confirm('Delete this recording? The file will be permanently removed.')) return;
+      if (!confirm('Eliminare questa registrazione? Il file verrà rimosso definitivamente.')) return;
       deletingIds.add(id);
       try {
         const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
@@ -682,7 +685,7 @@ createApp({
         }
         await fetchRecordings();
       } catch {
-        alert('Network error.');
+        alert('Errore di rete.');
       } finally {
         deletingIds.delete(id);
       }

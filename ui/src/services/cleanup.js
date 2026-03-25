@@ -27,7 +27,7 @@ function cleanupOldRecordings() {
 			// If the file is older than one month, delete it
 			if (now - stat.mtimeMs > ONE_MONTH_MS) {
 				fs.unlinkSync(filePath);
-				console.log(`Auto-deleted old recording: ${file}`);
+				console.log(`Registrazione vecchia eliminata automaticamente: ${file}`);
 
 				// Remove any associated job from the job store
 				for (const [id, job] of jobs.entries()) {
@@ -35,7 +35,7 @@ function cleanupOldRecordings() {
 				}
 			}
 		} catch (err) {
-			console.error(`Failed to auto-delete ${file}: ${err.message}`);
+			console.error(`Eliminazione automatica di ${file} non riuscita: ${err.message}`);
 		}
 	}
 }

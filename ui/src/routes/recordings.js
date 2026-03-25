@@ -21,7 +21,7 @@ router.get('/', (_req, res) => {
 // Start a new recording
 router.post('/', async (req, res) => {
 	const { url, duration } = req.body;
-	if (!url) return res.status(400).json({ error: 'url is required' });
+	if (!url) return res.status(400).json({ error: 'url obbligatorio' });
 
 	const id = randomUUID();
 	const filename = `${id}.mp4`;
@@ -33,7 +33,7 @@ router.post('/', async (req, res) => {
 	try {
 		container = await createAndStartContainer(env);
 	} catch (err) {
-		return res.status(500).json({ error: `Failed to start recorder: ${err.message}` });
+		return res.status(500).json({ error: `Avvio registratore non riuscito: ${err.message}` });
 	}
 
 	const job = {
@@ -59,7 +59,7 @@ router.post('/', async (req, res) => {
 // Stop an in-progress recording, or delete a completed/failed one
 router.delete('/:id', async (req, res) => {
 	const job = jobs.get(req.params.id);
-	if (!job) return res.status(404).json({ error: 'Recording not found' });
+	if (!job) return res.status(404).json({ error: 'Registrazione non trovata' });
 
 	if (job.status === 'recording') {
 		try {
@@ -75,26 +75,26 @@ router.delete('/:id', async (req, res) => {
 		try {
 			if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 		} catch (err) {
-			return res.status(500).json({ error: `Failed to delete file: ${err.message}` });
+			return res.status(500).json({ error: `Eliminazione file non riuscita: ${err.message}` });
 		}
 		jobs.delete(job.id);
 		res.json({ ok: true });
 	} else {
-		return res.status(400).json({ error: `Cannot delete a recording with status "${job.status}"` });
+		return res.status(400).json({ error: `Impossibile eliminare una registrazione con stato "${job.status}"` });
 	}
 });
 
 // Download a completed recording
 router.get('/:id/download', (req, res) => {
 	const job = jobs.get(req.params.id);
-	if (!job) return res.status(404).json({ error: 'Recording not found' });
+	if (!job) return res.status(404).json({ error: 'Registrazione non trovata' });
 	if (job.status !== 'completed') {
-		return res.status(400).json({ error: 'Recording is not complete yet' });
+		return res.status(400).json({ error: 'La registrazione non è ancora completata' });
 	}
 
 	const filePath = path.join(RECORDINGS_DIR, job.output);
 	if (!fs.existsSync(filePath)) {
-		return res.status(404).json({ error: 'File not found on disk' });
+		return res.status(404).json({ error: 'File non trovato su disco' });
 	}
 
 	res.download(filePath, `recording-${job.id.slice(0, 8)}.mp4`);
@@ -103,7 +103,7 @@ router.get('/:id/download', (req, res) => {
 // SSE endpoint: stream container logs in real time
 router.get('/:id/logs', (req, res) => {
 	const job = jobs.get(req.params.id);
-	if (!job) return res.status(404).json({ error: 'Recording not found' });
+	if (!job) return res.status(404).json({ error: 'Registrazione non trovata' });
 
 	res.setHeader('Content-Type', 'text/event-stream');
 	res.setHeader('Cache-Control', 'no-cache');
