@@ -112,6 +112,7 @@ async function main() {
 
   process.on('SIGINT', forwardSignal)
   process.on('SIGTERM', forwardSignal)
+  process.on('SIGQUIT', forwardSignal)
 
   await new Promise((resolve, reject) => {
     ffmpeg.on('exit', async (code) => {
