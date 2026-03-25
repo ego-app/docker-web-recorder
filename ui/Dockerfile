@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 COPY server.js ./
+COPY src ./src
 COPY public ./public
 
 EXPOSE 3000

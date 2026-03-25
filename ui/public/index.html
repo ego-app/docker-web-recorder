@@ -189,11 +189,10 @@
       color: var(--text);
     }
 
-    #form-error {
+    .form-error {
       margin-top: 12px;
       font-size: 13px;
       color: var(--red);
-      display: none;
     }
 
     /* --- Recordings list --- */
@@ -217,7 +216,7 @@
       color: #444;
     }
 
-    #recordings-list {
+    .recordings-list {
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -285,7 +284,6 @@
       border-radius: 50%;
     }
 
-    /* "starting" = preparing environment, FFmpeg not yet running */
     .badge-starting {
       background: rgba(128, 128, 128, 0.15);
       color: #888;
@@ -335,7 +333,6 @@
 
     /* --- Log panel --- */
     .log-panel {
-      display: none;
       border-top: 1px solid var(--border);
       background: #0a0a0a;
     }
@@ -351,8 +348,6 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
-
-    .log-line { }
 
     .log-line.highlight {
       color: var(--green);
@@ -385,379 +380,331 @@
 </head>
 <body>
 
-<header>
-  <div class="dot"></div>
-  <h1>Web Recorder</h1>
-</header>
+<div id="app">
+  <header>
+    <div class="dot"></div>
+    <h1>Web Recorder</h1>
+  </header>
 
-<div class="container">
-  <div class="card">
-    <h2>New Recording</h2>
-    <form id="start-form" autocomplete="off">
-      <div class="form-row">
-        <div class="field grow">
-          <label for="url-input">URL</label>
-          <input id="url-input" type="url" placeholder="https://example.com" required>
+  <div class="container">
+    <div class="card">
+      <h2>New Recording</h2>
+      <form @submit.prevent="startRecording" autocomplete="off">
+        <div class="form-row">
+          <div class="field grow">
+            <label>URL</label>
+            <input v-model="newUrl" type="url" placeholder="https://example.com" required>
+          </div>
+          <div class="field" style="width:130px">
+            <label>Duration (optional)</label>
+            <input v-model="newDuration" type="text" placeholder="e.g. 60">
+          </div>
+          <button type="submit" class="btn-primary" :disabled="submitting">
+            {{ submitting ? 'Starting\u2026' : 'Start recording' }}
+          </button>
         </div>
-        <div class="field" style="width:130px">
-          <label for="duration-input">Duration (optional)</label>
-          <input id="duration-input" type="text" placeholder="e.g. 60">
-        </div>
-        <button type="submit" class="btn-primary" id="start-btn">Start recording</button>
+        <div v-if="formError" class="form-error">{{ formError }}</div>
+      </form>
+    </div>
+
+    <div class="section-header">
+      <h2>Recordings</h2>
+      <span class="refresh-indicator">auto-refresh on</span>
+    </div>
+
+    <div class="recordings-list">
+      <div v-if="recordings.length === 0" class="empty-state">
+        <p>&#9654;</p>
+        <p>No recordings yet. Start one above.</p>
       </div>
-      <div id="form-error"></div>
-    </form>
-  </div>
 
-  <div class="section-header">
-    <h2>Recordings</h2>
-    <span class="refresh-indicator" id="refresh-label">auto-refresh on</span>
-  </div>
-  <div id="recordings-list">
-    <div class="empty-state">
-      <p>&#9654;</p>
-      <p>No recordings yet. Start one above.</p>
+      <div
+        v-for="r in recordings"
+        :key="r.id"
+        class="recording-wrapper"
+        :class="`status-${effectiveStatus(r)}`"
+      >
+        <div class="recording-item">
+          <div class="recording-info">
+            <div class="recording-url" :title="r.url">{{ r.url }}</div>
+            <div class="recording-meta">
+              <span>Started {{ fmt(r.startedAt) }}</span>
+              <span>{{ timeInfoFor(r) }}</span>
+              <span v-if="r.duration">Limit: {{ r.duration }}s</span>
+            </div>
+          </div>
+          <span class="badge" :class="`badge-${effectiveStatus(r)}`">
+            <span class="badge-dot"></span>{{ badgeLabel(r) }}
+          </span>
+          <div class="recording-actions">
+            <button
+              v-if="r.status === 'recording'"
+              class="btn-danger"
+              :disabled="stoppingIds.has(r.id)"
+              @click="stopRecording(r.id)"
+            >Stop</button>
+            <button
+              v-if="r.downloadable"
+              class="btn-download"
+              @click="downloadRecording(r.id)"
+            >Download</button>
+            <button
+              v-if="r.status === 'completed' || r.status === 'failed'"
+              class="btn-delete"
+              :disabled="deletingIds.has(r.id)"
+              @click="deleteRecording(r.id)"
+            >Delete</button>
+            <button class="btn-logs" @click="toggleLogs(r.id)">
+              Logs {{ expandedLogs.has(r.id) ? '\u25b2' : '\u25bc' }}
+            </button>
+          </div>
+        </div>
+        <div v-show="expandedLogs.has(r.id)" class="log-panel">
+          <div class="log-output" :ref="el => setLogOutputRef(r.id, el)">
+            <div v-if="getJobLogs(r.id).length === 0" class="log-empty">No output yet\u2026</div>
+            <div
+              v-for="(line, idx) in getJobLogs(r.id)"
+              :key="idx"
+              class="log-line"
+              :class="{ highlight: line.includes('Starting FFmpeg') }"
+            >{{ line }}</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script>
-  const form = document.getElementById('start-form');
-  const urlInput = document.getElementById('url-input');
-  const durationInput = document.getElementById('duration-input');
-  const startBtn = document.getElementById('start-btn');
-  const formError = document.getElementById('form-error');
-  const list = document.getElementById('recordings-list');
+const { createApp, ref, reactive, nextTick, onMounted } = Vue;
 
-  let recordings = [];
-  let refreshTimer = null;
+createApp({
+  setup() {
+    const recordings = ref([]);
+    const newUrl = ref('');
+    const newDuration = ref('');
+    const submitting = ref(false);
+    const formError = ref('');
 
-  // Per-job UI state preserved across re-renders
-  const expandedLogs = new Set();   // job IDs with log panel open
-  const eventSources = new Map();   // jobId -> EventSource
-  const jobLogs = new Map();        // jobId -> string[]
+    // Vue 3 tracks reactive Map/Set mutations (add, delete, get, has)
+    const expandedLogs = reactive(new Set());
+    const jobLogs = reactive(new Map());
+    const stoppingIds = reactive(new Set());
+    const deletingIds = reactive(new Set());
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
+    // Non-reactive: SSE connections and DOM element refs
+    const eventSources = new Map();
+    const logOutputRefs = new Map();
 
-  function escHtml(str) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+    // ── Helpers ───────────────────────────────────────────────────────────
 
-  function fmt(iso) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleString(undefined, {
-      month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-  }
-
-  function elapsed(start, end) {
-    const ms = new Date(end || Date.now()) - new Date(start);
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const h = Math.floor(m / 60);
-    if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`;
-    if (m > 0) return `${m}m ${s % 60}s`;
-    return `${s}s`;
-  }
-
-  function showError(msg) {
-    formError.textContent = msg;
-    formError.style.display = 'block';
-  }
-
-  function clearError() {
-    formError.style.display = 'none';
-    formError.textContent = '';
-  }
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  function render() {
-    if (recordings.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <p>&#9654;</p>
-          <p>No recordings yet. Start one above.</p>
-        </div>`;
-      return;
+    function fmt(iso) {
+      if (!iso) return '\u2014';
+      return new Date(iso).toLocaleString(undefined, {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
     }
 
-    // Save scroll positions of open log panels before blowing away the DOM
-    const scrollPositions = {};
-    for (const id of expandedLogs) {
-      const el = document.getElementById(`log-output-${id}`);
-      if (el) scrollPositions[id] = el.scrollTop;
+    function elapsed(start, end) {
+      const ms = new Date(end || Date.now()) - new Date(start);
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const h = Math.floor(m / 60);
+      if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`;
+      if (m > 0) return `${m}m ${s % 60}s`;
+      return `${s}s`;
     }
 
-    list.innerHTML = recordings.map(r => {
-      // "starting" = container running but FFmpeg not yet active
-      const effectiveStatus =
-        (r.status === 'recording' && !r.ffmpegStartedAt) ? 'starting' : r.status;
+    function effectiveStatus(r) {
+      return r.status === 'recording' && !r.ffmpegStartedAt ? 'starting' : r.status;
+    }
 
-      const badgeLabel = effectiveStatus === 'starting' ? 'Starting' :
-                         effectiveStatus === 'stopping' ? 'Stopping' : effectiveStatus;
+    function badgeLabel(r) {
+      const s = effectiveStatus(r);
+      if (s === 'starting') return 'Starting';
+      if (s === 'stopping') return 'Stopping';
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
 
-      // Meta timing line
-      let timeInfo;
+    function timeInfoFor(r) {
       if (r.status === 'recording') {
-        if (r.ffmpegStartedAt) {
-          timeInfo = `${elapsed(r.ffmpegStartedAt)} recording`;
-        } else {
-          timeInfo = 'Preparing environment\u2026';
-        }
-      } else if (r.status === 'stopping') {
-        timeInfo = r.ffmpegStartedAt
+        return r.ffmpegStartedAt
+          ? `${elapsed(r.ffmpegStartedAt)} recording`
+          : 'Preparing environment\u2026';
+      }
+      if (r.status === 'stopping') {
+        return r.ffmpegStartedAt
           ? `${elapsed(r.ffmpegStartedAt)} \u00b7 Finalizing\u2026`
           : 'Finalizing\u2026';
-      } else if (r.completedAt) {
+      }
+      if (r.completedAt) {
         const from = r.ffmpegStartedAt || r.startedAt;
-        timeInfo = `${elapsed(from, r.completedAt)} recorded`;
+        return `${elapsed(from, r.completedAt)} recorded`;
+      }
+      return `${elapsed(r.startedAt)} elapsed`;
+    }
+
+    function getJobLogs(id) {
+      return jobLogs.get(id) || [];
+    }
+
+    // ── Log panel ─────────────────────────────────────────────────────────
+
+    function setLogOutputRef(id, el) {
+      if (el) logOutputRefs.set(id, el);
+      else logOutputRefs.delete(id);
+    }
+
+    async function toggleLogs(id) {
+      if (expandedLogs.has(id)) {
+        expandedLogs.delete(id);
       } else {
-        timeInfo = `${elapsed(r.startedAt)} elapsed`;
+        expandedLogs.add(id);
+        connectLogs(id);
+        await nextTick();
+        const el = logOutputRefs.get(id);
+        if (el) el.scrollTop = el.scrollHeight;
       }
-
-      const meta = [
-        `Started ${fmt(r.startedAt)}`,
-        timeInfo,
-        r.duration ? `Limit: ${r.duration}s` : null,
-      ].filter(Boolean).join(' &nbsp;&middot;&nbsp; ');
-
-      const stopBtn = (r.status === 'recording')
-        ? `<button class="btn-danger" onclick="stopRecording('${r.id}')">Stop</button>`
-        : '';
-
-      const dlBtn = r.downloadable
-        ? `<button class="btn-download" onclick="downloadRecording('${r.id}')">Download</button>`
-        : '';
-
-      const deleteBtn = (r.status === 'completed' || r.status === 'failed')
-        ? `<button class="btn-delete" onclick="deleteRecording('${r.id}')">Delete</button>`
-        : '';
-
-      const logsOpen = expandedLogs.has(r.id);
-      const logsBtn = `<button class="btn-logs" id="btn-logs-${r.id}" onclick="toggleLogs('${r.id}')">${logsOpen ? 'Logs &#9652;' : 'Logs &#9662;'}</button>`;
-
-      return `
-        <div class="recording-wrapper status-${effectiveStatus}" id="wrapper-${r.id}">
-          <div class="recording-item">
-            <div class="recording-info">
-              <div class="recording-url" title="${escHtml(r.url)}">${escHtml(r.url)}</div>
-              <div class="recording-meta">${meta}</div>
-            </div>
-            <span class="badge badge-${effectiveStatus}">
-              <span class="badge-dot"></span>${badgeLabel}
-            </span>
-            <div class="recording-actions">${stopBtn}${dlBtn}${deleteBtn}${logsBtn}</div>
-          </div>
-          <div class="log-panel" id="logs-${r.id}">
-            <div class="log-output" id="log-output-${r.id}"></div>
-          </div>
-        </div>`;
-    }).join('');
-
-    // Restore expanded log panels
-    for (const id of expandedLogs) {
-      const panel = document.getElementById(`logs-${id}`);
-      const output = document.getElementById(`log-output-${id}`);
-      if (!panel || !output) continue;
-
-      panel.style.display = 'block';
-      renderLogs(id, output);
-
-      // Restore scroll position (or stay at bottom if it was there)
-      const prevScroll = scrollPositions[id];
-      const atBottom = prevScroll === undefined ||
-        prevScroll >= output.scrollHeight - output.clientHeight - 20;
-      output.scrollTop = atBottom ? output.scrollHeight : prevScroll;
     }
-  }
 
-  function renderLogs(jobId, outputEl) {
-    const lines = jobLogs.get(jobId) || [];
-    if (lines.length === 0) {
-      outputEl.innerHTML = '<div class="log-empty">No output yet…</div>';
-      return;
-    }
-    outputEl.innerHTML = lines.map(line => {
-      const cls = line.includes('Starting FFmpeg') ? ' highlight' : '';
-      return `<div class="log-line${cls}">${escHtml(line)}</div>`;
-    }).join('');
-  }
+    function connectLogs(jobId) {
+      if (eventSources.has(jobId)) return;
 
-  // ── Log panel toggle & SSE ────────────────────────────────────────────────
+      const es = new EventSource(`/api/recordings/${jobId}/logs`);
+      eventSources.set(jobId, es);
 
-  function toggleLogs(id) {
-    const panel = document.getElementById(`logs-${id}`);
-    const btn = document.getElementById(`btn-logs-${id}`);
-    if (!panel) return;
+      es.onmessage = async (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
 
-    if (expandedLogs.has(id)) {
-      expandedLogs.delete(id);
-      panel.style.display = 'none';
-      if (btn) btn.innerHTML = 'Logs &#9662;';
-    } else {
-      expandedLogs.add(id);
-      panel.style.display = 'block';
-      if (btn) btn.innerHTML = 'Logs &#9652;';
+        if (msg.type === 'log') {
+          if (!jobLogs.has(jobId)) jobLogs.set(jobId, []);
 
-      const output = document.getElementById(`log-output-${id}`);
-      if (output) {
-        renderLogs(id, output);
-        output.scrollTop = output.scrollHeight;
-      }
+          // Check scroll position before Vue updates the DOM
+          const el = logOutputRefs.get(jobId);
+          const atBottom = !el || (el.scrollHeight - el.scrollTop <= el.clientHeight + 20);
 
-      connectLogs(id);
-    }
-  }
+          jobLogs.get(jobId).push(msg.line);
 
-  function connectLogs(jobId) {
-    // Don't open a second EventSource for the same job
-    if (eventSources.has(jobId)) return;
-
-    const es = new EventSource(`/api/recordings/${jobId}/logs`);
-    eventSources.set(jobId, es);
-
-    es.onmessage = (evt) => {
-      let msg;
-      try { msg = JSON.parse(evt.data); } catch { return; }
-
-      if (msg.type === 'log') {
-        if (!jobLogs.has(jobId)) jobLogs.set(jobId, []);
-        jobLogs.get(jobId).push(msg.line);
-
-        // Append directly to DOM if panel is open (avoid full re-render)
-        const output = document.getElementById(`log-output-${jobId}`);
-        if (output && expandedLogs.has(jobId)) {
-          // Remove "no output" placeholder if present
-          const empty = output.querySelector('.log-empty');
-          if (empty) empty.remove();
-
-          const atBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 20;
-          const div = document.createElement('div');
-          div.className = 'log-line' + (msg.line.includes('Starting FFmpeg') ? ' highlight' : '');
-          div.textContent = msg.line;
-          output.appendChild(div);
-          if (atBottom) output.scrollTop = output.scrollHeight;
+          if (atBottom && expandedLogs.has(jobId)) {
+            await nextTick();
+            const scrollEl = logOutputRefs.get(jobId);
+            if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+          }
+        } else if (msg.type === 'ffmpegStarted') {
+          const rec = recordings.value.find(r => r.id === jobId);
+          if (rec && !rec.ffmpegStartedAt) {
+            rec.ffmpegStartedAt = msg.timestamp;
+          }
+        } else if (msg.type === 'done') {
+          es.close();
+          eventSources.delete(jobId);
+          await fetchRecordings();
         }
-      } else if (msg.type === 'ffmpegStarted') {
-        // Update recording state immediately — don't wait for the next poll
-        const rec = recordings.find(r => r.id === jobId);
-        if (rec && !rec.ffmpegStartedAt) {
-          rec.ffmpegStartedAt = msg.timestamp;
-          render();
-        }
-      } else if (msg.type === 'done') {
+      };
+
+      es.onerror = () => {
         es.close();
         eventSources.delete(jobId);
-        // Final poll to pick up completed/failed status
-        fetchRecordings();
+      };
+    }
+
+    // ── API calls ─────────────────────────────────────────────────────────
+
+    async function fetchRecordings() {
+      try {
+        const r = await fetch('/api/recordings');
+        recordings.value = await r.json();
+      } catch {
+        // silently ignore — will retry on next poll
       }
+    }
+
+    async function startRecording() {
+      formError.value = '';
+      const url = newUrl.value.trim();
+      const duration = newDuration.value.trim();
+      if (!url) { formError.value = 'URL is required.'; return; }
+
+      submitting.value = true;
+      try {
+        const body = { url };
+        if (duration) body.duration = duration;
+
+        const r = await fetch('/api/recordings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await r.json();
+        if (!r.ok) { formError.value = data.error || 'Failed to start recording.'; return; }
+
+        newUrl.value = '';
+        newDuration.value = '';
+        await fetchRecordings();
+      } catch {
+        formError.value = 'Network error. Is the server running?';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    async function stopRecording(id) {
+      stoppingIds.add(id);
+      try {
+        const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
+        if (!r.ok) {
+          const { error } = await r.json();
+          alert(error);
+        }
+        await fetchRecordings();
+      } finally {
+        stoppingIds.delete(id);
+      }
+    }
+
+    function downloadRecording(id) {
+      window.location.href = `/api/recordings/${id}/download`;
+    }
+
+    async function deleteRecording(id) {
+      if (!confirm('Delete this recording? The file will be permanently removed.')) return;
+      deletingIds.add(id);
+      try {
+        const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
+        if (!r.ok) {
+          const { error } = await r.json();
+          alert(error);
+          return;
+        }
+        await fetchRecordings();
+      } catch {
+        alert('Network error.');
+      } finally {
+        deletingIds.delete(id);
+      }
+    }
+
+    // ── Polling ───────────────────────────────────────────────────────────
+
+    onMounted(() => {
+      fetchRecordings();
+      setInterval(fetchRecordings, 2000);
+    });
+
+    return {
+      recordings, newUrl, newDuration, submitting, formError,
+      expandedLogs, jobLogs, stoppingIds, deletingIds,
+      setLogOutputRef,
+      fmt, effectiveStatus, badgeLabel, timeInfoFor, getJobLogs,
+      toggleLogs,
+      startRecording, stopRecording, downloadRecording, deleteRecording,
     };
-
-    es.onerror = () => {
-      es.close();
-      eventSources.delete(jobId);
-    };
   }
-
-  // ── API calls ─────────────────────────────────────────────────────────────
-
-  async function fetchRecordings() {
-    try {
-      const r = await fetch('/api/recordings');
-      recordings = await r.json();
-      render();
-    } catch {
-      // silently ignore — will retry
-    }
-  }
-
-  async function stopRecording(id) {
-    const btn = event.currentTarget;
-    btn.disabled = true;
-    try {
-      const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
-      if (!r.ok) {
-        const { error } = await r.json();
-        alert(error);
-      }
-      await fetchRecordings();
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  function downloadRecording(id) {
-    window.location.href = `/api/recordings/${id}/download`;
-  }
-
-  async function deleteRecording(id) {
-    if (!confirm('Delete this recording? The file will be permanently removed.')) return;
-    const btn = event.currentTarget;
-    btn.disabled = true;
-    try {
-      const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
-      if (!r.ok) {
-        const { error } = await r.json();
-        alert(error);
-        btn.disabled = false;
-        return;
-      }
-      await fetchRecordings();
-    } catch {
-      alert('Network error.');
-      btn.disabled = false;
-    }
-  }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    clearError();
-
-    const url = urlInput.value.trim();
-    const duration = durationInput.value.trim();
-    if (!url) { showError('URL is required.'); return; }
-
-    startBtn.disabled = true;
-    startBtn.textContent = 'Starting\u2026';
-
-    try {
-      const body = { url };
-      if (duration) body.duration = duration;
-
-      const r = await fetch('/api/recordings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await r.json();
-      if (!r.ok) { showError(data.error || 'Failed to start recording.'); return; }
-
-      urlInput.value = '';
-      durationInput.value = '';
-      await fetchRecordings();
-    } catch (err) {
-      showError('Network error. Is the server running?');
-    } finally {
-      startBtn.disabled = false;
-      startBtn.textContent = 'Start recording';
-    }
-  });
-
-  // ── Polling ───────────────────────────────────────────────────────────────
-
-  function startPolling() {
-    fetchRecordings();
-    refreshTimer = setInterval(fetchRecordings, 2000);
-  }
-
-  startPolling();
+}).mount('#app');
 </script>
 </body>
 </html>
