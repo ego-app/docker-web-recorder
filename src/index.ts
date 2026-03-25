@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process'
 import * as puppeteer from 'puppeteer-core'
 
 import getExporter from './exporters'
-import { durationToFFmpegParams } from './ffmpeg'
 
 const disableAudio = process.env.DISABLE_AUDIO === 'true'
 const fps = process.env.FPS || 30
@@ -25,10 +24,6 @@ async function main() {
 
   const exporter = getExporter(process.env.OUTPUT || 'output.mp4')
   await exporter.initializeExport()
-
-  const ffmpegDurationParams = durationToFFmpegParams(
-    process.env.DURATION || '',
-  )
 
   const browser = await puppeteer.launch({
     executablePath: '/usr/bin/chromium-browser',
@@ -74,24 +69,40 @@ async function main() {
   //   `,
   // )
 
-  const audioConfig = disableAudio
-    ? '-an'
-    : '-c:a aac -b:a 128k -ac 2 -ar 44100'
+  const audioArgs: string[] = disableAudio
+    ? ['-an']
+    : ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100']
 
-  const ffmpegCmd =
-    `ffmpeg -y -loglevel error -hide_banner -async 1 -nostdin -s ${resolution} -r ${fps} -draw_mouse 0
-    -f x11grab -i $DISPLAY
-    -f pulse -ac 2 -i default
-    -c:v libx264 -preset veryfast -tune ${tune} -b:v ${rate}k -minrate ${rate}k -maxrate ${rate}k -g 30
-    ${audioConfig}
-    -ss 00:00:03 ${ffmpegDurationParams} -pix_fmt yuv420p ${exporter.getFFmpegOutputParams()}`.replaceAll(
-      /[\n\r\s]+/gm,
-      ' ',
-    )
+  const durationArgs: string[] = process.env.DURATION
+    ? ['-t', process.env.DURATION]
+    : []
 
-  const ffmpeg = spawn(ffmpegCmd, { shell: true })
+  const display = process.env.DISPLAY || ':99'
+
+  const ffmpegArgs = [
+    '-y', '-loglevel', 'error', '-hide_banner',
+    '-async', '1', '-nostdin',
+    '-s', resolution,
+    '-r', String(fps),
+    '-draw_mouse', '0',
+    '-f', 'x11grab', '-i', display,
+    '-f', 'pulse', '-ac', '2', '-i', 'default',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', tune,
+    '-b:v', `${rate}k`, '-minrate', `${rate}k`, '-maxrate', `${rate}k`,
+    '-g', '30',
+    ...audioArgs,
+    '-ss', '00:00:03',
+    ...durationArgs,
+    '-pix_fmt', 'yuv420p',
+    ...exporter.getFFmpegOutputParams().split(/\s+/).filter(Boolean),
+  ]
+
+  const ffmpeg = spawn('ffmpeg', ffmpegArgs)
+
+  let stoppingGracefully = false
 
   const forwardSignal = (signal: NodeJS.Signals | number) => {
+    stoppingGracefully = true
     ffmpeg.kill(signal)
   }
 
@@ -103,7 +114,7 @@ async function main() {
       await browser.close()
       await exporter.finalizeExport()
 
-      if (code === 0 || code === null) {
+      if (code === 0 || code === null || stoppingGracefully) {
         resolve(null)
       } else {
         reject(new Error(`FFmpeg exited with code ${code}`))
