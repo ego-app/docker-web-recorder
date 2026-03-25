@@ -15,6 +15,7 @@ const RECORDER_IMAGE = process.env.RECORDER_IMAGE || 'docker-web-recorder:latest
 // Named volume used by docker-compose — must match the actual Docker volume name
 // so spawned recorder containers can share the same recordings directory.
 const RECORDINGS_VOLUME_NAME = process.env.RECORDINGS_VOLUME_NAME || null;
+const VOLUME_SOURCE = RECORDINGS_VOLUME_NAME || RECORDINGS_DIR;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -121,8 +122,7 @@ app.post('/api/recordings', async (req, res) => {
   if (duration) env.push(`DURATION=${duration}`);
 
   // Bind either the named Docker volume or the local path into the recorder container
-  const volumeSource = RECORDINGS_VOLUME_NAME || RECORDINGS_DIR;
-  const volumeBinding = `${volumeSource}:/app/recordings`;
+  const volumeBinding = `${VOLUME_SOURCE}:/app/recordings`;
 
   let container;
   try {
@@ -257,7 +257,7 @@ app.listen(3000, () => {
   console.log('Web Recorder UI listening on http://localhost:3000');
   console.log(`Recorder image : ${RECORDER_IMAGE}`);
   console.log(`Recordings dir : ${RECORDINGS_DIR}`);
-  console.log(`Volume source  : ${volumeSource}`);
+  console.log(`Volume source  : ${VOLUME_SOURCE}`);
   if (RECORDINGS_VOLUME_NAME) {
     console.log(`Volume name    : ${RECORDINGS_VOLUME_NAME}`);
   }
