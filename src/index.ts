@@ -110,6 +110,7 @@ async function main() {
     ffmpeg.kill(signal)
   }
 
+  console.log('Ready to record. Press Ctrl+C to stop.')
   process.on('SIGINT', forwardSignal)
   process.on('SIGTERM', forwardSignal)
   process.on('SIGQUIT', forwardSignal)
