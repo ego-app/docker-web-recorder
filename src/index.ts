@@ -22,9 +22,11 @@ async function main() {
   if (!resolutionWidth || !resolutionHeight)
     throw new Error('RESOLUTION must be in the format of 1280x720')
 
+  console.log(`Starting recording of ${url} at ${fps}fps, ${rate}kbps, resolution ${resolution}, audio ${disableAudio ? 'disabled' : 'enabled'}`)
   const exporter = getExporter(process.env.OUTPUT || 'output.mp4')
   await exporter.initializeExport()
 
+  console.log('Launching browser...')
   const browser = await puppeteer.launch({
     executablePath: '/usr/bin/chromium-browser',
     headless: false,
@@ -97,6 +99,7 @@ async function main() {
     ...exporter.getFFmpegOutputParams().split(/\s+/).filter(Boolean),
   ]
 
+  console.log(`Starting FFmpeg with args: ${ffmpegArgs.join(' ')}`)
   const ffmpeg = spawn('ffmpeg', ffmpegArgs)
 
   let stoppingGracefully = false
@@ -112,6 +115,7 @@ async function main() {
 
   await new Promise((resolve, reject) => {
     ffmpeg.on('exit', async (code) => {
+      console.log(`FFmpeg exited with code ${code}`)
       await browser.close()
       await exporter.finalizeExport()
 
