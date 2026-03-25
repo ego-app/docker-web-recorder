@@ -101,10 +101,12 @@ async function main() {
 
   let ffmpeg: ReturnType<typeof spawn>
 
-  const forwardSignal = (signal: NodeJS.Signals | number) => {
+  const forwardSignal = async (signal: NodeJS.Signals | number) =>{
     console.log(`Received signal ${signal}, stopping gracefully...`)
     stoppingGracefully = true
     ffmpeg.kill(signal)
+
+    await exporter.finalizeExport()
   }
 
   console.log('Ready to record. Press Ctrl+C to stop.')
