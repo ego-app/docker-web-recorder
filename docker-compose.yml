@@ -21,6 +21,9 @@ services:
       #   docker build -t my-recorder:latest .
       #   RECORDER_IMAGE=my-recorder:latest docker compose up
       - RECORDER_IMAGE=${RECORDER_IMAGE:-digiz3d/web-recorder:latest}
+      # Optional: protect the UI with HTTP Basic Auth (leave unset to disable)
+      # - UI_USERNAME=admin
+      # - UI_PASSWORD=secret
     restart: unless-stopped
 
 volumes:
