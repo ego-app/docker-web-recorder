@@ -179,22 +179,32 @@ app.post('/api/recordings', async (req, res) => {
   res.status(201).json(jobView(job));
 });
 
-// Stop an in-progress recording
+// Stop an in-progress recording, or delete a completed/failed one
 app.delete('/api/recordings/:id', async (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Recording not found' });
-  if (job.status !== 'recording') {
-    return res.status(400).json({ error: `Cannot stop a recording with status "${job.status}"` });
-  }
 
-  try {
-    job.status = 'stopping';
-    // SIGTERM triggers graceful shutdown in the recorder (finalizes the export)
-    await docker.getContainer(job.containerId).kill({ signal: 'SIGTERM' });
+  if (job.status === 'recording') {
+    try {
+      job.status = 'stopping';
+      // SIGTERM triggers graceful shutdown in the recorder (finalizes the export)
+      await docker.getContainer(job.containerId).kill({ signal: 'SIGTERM' });
+      res.json({ ok: true });
+    } catch (err) {
+      job.status = 'failed';
+      res.status(500).json({ error: err.message });
+    }
+  } else if (job.status === 'completed' || job.status === 'failed') {
+    const filePath = path.join(RECORDINGS_DIR, job.output);
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (err) {
+      return res.status(500).json({ error: `Failed to delete file: ${err.message}` });
+    }
+    jobs.delete(job.id);
     res.json({ ok: true });
-  } catch (err) {
-    job.status = 'failed';
-    res.status(500).json({ error: err.message });
+  } else {
+    return res.status(400).json({ error: `Cannot delete a recording with status "${job.status}"` });
   }
 });
 
@@ -253,6 +263,33 @@ app.get('/api/recordings/:id/logs', (req, res) => {
   });
 });
 
+function cleanupOldRecordings() {
+  const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  let files;
+  try {
+    files = fs.readdirSync(RECORDINGS_DIR);
+  } catch {
+    return; // directory not accessible yet
+  }
+  for (const file of files) {
+    if (!file.endsWith('.mp4')) continue;
+    const filePath = path.join(RECORDINGS_DIR, file);
+    try {
+      const stat = fs.statSync(filePath);
+      if (now - stat.mtimeMs > ONE_MONTH_MS) {
+        fs.unlinkSync(filePath);
+        console.log(`Auto-deleted old recording: ${file}`);
+        for (const [id, job] of jobs.entries()) {
+          if (job.output === file) { jobs.delete(id); break; }
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to auto-delete ${file}: ${err.message}`);
+    }
+  }
+}
+
 app.listen(3000, () => {
   console.log('Web Recorder UI listening on http://localhost:3000');
   console.log(`Recorder image : ${RECORDER_IMAGE}`);
@@ -272,4 +309,8 @@ app.listen(3000, () => {
       console.log(`Recordings directory "${RECORDINGS_DIR}" is writable.`);
     }
   });
+
+  // Delete recordings older than 30 days on startup and every hour
+  cleanupOldRecordings();
+  setInterval(cleanupOldRecordings, 60 * 60 * 1000);
 });

@@ -166,6 +166,18 @@
       background: rgba(34, 197, 94, 0.22);
     }
 
+    .btn-delete {
+      background: transparent;
+      color: #555;
+      border: 1px solid #333;
+    }
+
+    .btn-delete:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--red);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
     .btn-logs {
       background: rgba(255, 255, 255, 0.05);
       color: var(--text-muted);
@@ -523,6 +535,10 @@
         ? `<button class="btn-download" onclick="downloadRecording('${r.id}')">Download</button>`
         : '';
 
+      const deleteBtn = (r.status === 'completed' || r.status === 'failed')
+        ? `<button class="btn-delete" onclick="deleteRecording('${r.id}')">Delete</button>`
+        : '';
+
       const logsOpen = expandedLogs.has(r.id);
       const logsBtn = `<button class="btn-logs" id="btn-logs-${r.id}" onclick="toggleLogs('${r.id}')">${logsOpen ? 'Logs &#9652;' : 'Logs &#9662;'}</button>`;
 
@@ -536,7 +552,7 @@
             <span class="badge badge-${effectiveStatus}">
               <span class="badge-dot"></span>${badgeLabel}
             </span>
-            <div class="recording-actions">${stopBtn}${dlBtn}${logsBtn}</div>
+            <div class="recording-actions">${stopBtn}${dlBtn}${deleteBtn}${logsBtn}</div>
           </div>
           <div class="log-panel" id="logs-${r.id}">
             <div class="log-output" id="log-output-${r.id}"></div>
@@ -678,6 +694,25 @@
 
   function downloadRecording(id) {
     window.location.href = `/api/recordings/${id}/download`;
+  }
+
+  async function deleteRecording(id) {
+    if (!confirm('Delete this recording? The file will be permanently removed.')) return;
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const { error } = await r.json();
+        alert(error);
+        btn.disabled = false;
+        return;
+      }
+      await fetchRecordings();
+    } catch {
+      alert('Network error.');
+      btn.disabled = false;
+    }
   }
 
   form.addEventListener('submit', async (e) => {
