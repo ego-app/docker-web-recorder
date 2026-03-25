@@ -390,16 +390,22 @@
     <div class="card">
       <h2>Nuova Registrazione</h2>
       <form @submit.prevent="startRecording" autocomplete="off">
-        <div class="form-row">
+        <div class="form-row" style="margin-bottom:10px">
           <div class="field grow">
             <label>URL</label>
             <input v-model="newUrl" type="url" placeholder="https://example.com" required>
           </div>
-          <div class="field" style="width:130px">
-            <label>Durata (opzionale)</label>
-            <input v-model="newDuration" type="text" placeholder="es. 60">
+          <div class="field grow">
+            <label>Nome (opzionale)</label>
+            <input v-model="newName" type="text" placeholder="es. Homepage mattina">
           </div>
-          <button type="submit" class="btn-primary" :disabled="submitting">
+        </div>
+        <div class="form-row">
+          <div class="field" style="width:160px">
+            <label>Durata in minuti (opz.)</label>
+            <input v-model="newDuration" type="number" min="1" placeholder="es. 5">
+          </div>
+          <button type="submit" class="btn-primary" :disabled="submitting" style="margin-top:auto">
             {{ submitting ? 'Avvio\u2026' : 'Avvia registrazione' }}
           </button>
         </div>
@@ -426,11 +432,12 @@
       >
         <div class="recording-item">
           <div class="recording-info">
-            <div class="recording-url" :title="r.url">{{ r.url }}</div>
+            <div class="recording-url" :title="r.url">{{ r.name || r.url }}</div>
+            <div v-if="r.name" style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px">{{ r.url }}</div>
             <div class="recording-meta">
               <span>Avviata {{ fmt(r.startedAt) }}</span>
               <span>{{ timeInfoFor(r) }}</span>
-              <span v-if="r.duration">Limite: {{ r.duration }}s</span>
+              <span v-if="r.duration">Limite: {{ r.duration }} min</span>
             </div>
           </div>
           <span class="badge" :class="`badge-${effectiveStatus(r)}`">
@@ -483,6 +490,7 @@ createApp({
   setup() {
     const recordings = ref([]);
     const newUrl = ref('');
+    const newName = ref('');
     const newDuration = ref('');
     const submitting = ref(false);
     const formError = ref('');
@@ -634,6 +642,7 @@ createApp({
       submitting.value = true;
       try {
         const body = { url };
+        if (newName.value.trim()) body.name = newName.value.trim();
         if (duration) body.duration = duration;
 
         const r = await fetch('/api/recordings', {
@@ -646,6 +655,7 @@ createApp({
         if (!r.ok) { formError.value = data.error || 'Avvio registrazione non riuscito.'; return; }
 
         newUrl.value = '';
+        newName.value = '';
         newDuration.value = '';
         await fetchRecordings();
       } catch {
@@ -699,7 +709,7 @@ createApp({
     });
 
     return {
-      recordings, newUrl, newDuration, submitting, formError,
+      recordings, newUrl, newName, newDuration, submitting, formError,
       expandedLogs, jobLogs, stoppingIds, deletingIds,
       setLogOutputRef,
       fmt, effectiveStatus, badgeLabel, timeInfoFor, getJobLogs,

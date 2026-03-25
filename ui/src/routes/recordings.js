@@ -20,14 +20,14 @@ router.get('/', (_req, res) => {
 
 // Start a new recording
 router.post('/', async (req, res) => {
-	const { url, duration } = req.body;
+	const { url, duration, name } = req.body;
 	if (!url) return res.status(400).json({ error: 'url obbligatorio' });
 
 	const id = randomUUID();
 	const filename = `${id}.mp4`;
 
 	const env = [`URL=${url}`, `OUTPUT=${filename}`];
-	if (duration) env.push(`DURATION=${duration}`);
+	if (duration) env.push(`DURATION=${parseInt(duration) * 60}`);
 
 	let container;
 	try {
@@ -38,8 +38,9 @@ router.post('/', async (req, res) => {
 
 	const job = {
 		id,
+		name: name ? name.trim() : null,
 		url,
-		duration: duration || null,
+		duration: duration ? parseInt(duration) : null,
 		output: filename,
 		containerId: container.id,
 		status: 'recording',

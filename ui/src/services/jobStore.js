@@ -30,6 +30,7 @@ function jobView(job) {
 	const filePath = path.join(RECORDINGS_DIR, job.output);
 	return {
 		id: job.id,
+		name: job.name || null,
 		url: job.url,
 		duration: job.duration,
 		output: job.output,
