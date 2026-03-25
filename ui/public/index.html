@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Recorder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0d;
+      --surface: #161616;
+      --surface-2: #1f1f1f;
+      --border: #2a2a2a;
+      --text: #e2e2e2;
+      --text-muted: #888;
+      --blue: #3b82f6;
+      --blue-hover: #2563eb;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --radius: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    header .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      flex-shrink: 0;
+    }
+
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    /* --- Form card --- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+
+    .card h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.grow { flex: 1; }
+
+    .field label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    input[type="text"],
+    input[type="url"],
+    input[type="number"] {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+      height: 38px;
+      padding: 0 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+
+    input:focus {
+      border-color: var(--blue);
+    }
+
+    input::placeholder {
+      color: #555;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      height: 38px;
+      padding: 0 18px;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--blue-hover);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--red);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    .btn-download {
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--green);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+    }
+
+    .btn-download:hover:not(:disabled) {
+      background: rgba(34, 197, 94, 0.22);
+    }
+
+    #form-error {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--red);
+      display: none;
+    }
+
+    /* --- Recordings list --- */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .section-header h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .refresh-indicator {
+      font-size: 11px;
+      color: #444;
+    }
+
+    #recordings-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .recording-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .recording-item.status-recording {
+      border-left: 3px solid var(--blue);
+    }
+
+    .recording-item.status-stopping {
+      border-left: 3px solid var(--amber);
+    }
+
+    .recording-item.status-completed {
+      border-left: 3px solid var(--green);
+    }
+
+    .recording-item.status-failed {
+      border-left: 3px solid var(--red);
+    }
+
+    .recording-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .recording-url {
+      font-size: 13px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-bottom: 4px;
+    }
+
+    .recording-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .badge-recording {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--blue);
+    }
+
+    .badge-recording .badge-dot {
+      background: var(--blue);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    .badge-stopping {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--amber);
+    }
+
+    .badge-stopping .badge-dot { background: var(--amber); }
+
+    .badge-completed {
+      background: rgba(34, 197, 94, 0.12);
+      color: var(--green);
+    }
+
+    .badge-completed .badge-dot { background: var(--green); }
+
+    .badge-failed {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--red);
+    }
+
+    .badge-failed .badge-dot { background: var(--red); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    .recording-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 0;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .empty-state p:first-child {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
+    @media (max-width: 560px) {
+      .form-row { flex-direction: column; }
+      .recording-item { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Web Recorder</h1>
+</header>
+
+<div class="container">
+  <div class="card">
+    <h2>New Recording</h2>
+    <form id="start-form" autocomplete="off">
+      <div class="form-row">
+        <div class="field grow">
+          <label for="url-input">URL</label>
+          <input id="url-input" type="url" placeholder="https://example.com" required>
+        </div>
+        <div class="field" style="width:130px">
+          <label for="duration-input">Duration (optional)</label>
+          <input id="duration-input" type="text" placeholder="e.g. 60">
+        </div>
+        <button type="submit" class="btn-primary" id="start-btn">Start recording</button>
+      </div>
+      <div id="form-error"></div>
+    </form>
+  </div>
+
+  <div class="section-header">
+    <h2>Recordings</h2>
+    <span class="refresh-indicator" id="refresh-label">auto-refresh on</span>
+  </div>
+  <div id="recordings-list">
+    <div class="empty-state">
+      <p>&#9654;</p>
+      <p>No recordings yet. Start one above.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const form = document.getElementById('start-form');
+  const urlInput = document.getElementById('url-input');
+  const durationInput = document.getElementById('duration-input');
+  const startBtn = document.getElementById('start-btn');
+  const formError = document.getElementById('form-error');
+  const list = document.getElementById('recordings-list');
+
+  let recordings = [];
+  let refreshTimer = null;
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  function fmt(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  }
+
+  function elapsed(start, end) {
+    const ms = new Date(end || Date.now()) - new Date(start);
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`;
+    if (m > 0) return `${m}m ${s % 60}s`;
+    return `${s}s`;
+  }
+
+  function showError(msg) {
+    formError.textContent = msg;
+    formError.style.display = 'block';
+  }
+
+  function clearError() {
+    formError.style.display = 'none';
+    formError.textContent = '';
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  function render() {
+    if (recordings.length === 0) {
+      list.innerHTML = `
+        <div class="empty-state">
+          <p>&#9654;</p>
+          <p>No recordings yet. Start one above.</p>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = recordings.map(r => {
+      const badgeClass = `badge-${r.status}`;
+      const label = r.status === 'stopping' ? 'stopping' : r.status;
+
+      const meta = [
+        `Started ${fmt(r.startedAt)}`,
+        r.completedAt
+          ? `Completed ${fmt(r.completedAt)} &middot; ${elapsed(r.startedAt, r.completedAt)}`
+          : `${elapsed(r.startedAt)} elapsed`,
+        r.duration ? `Limit: ${r.duration}s` : null,
+      ].filter(Boolean).join(' &nbsp;&middot;&nbsp; ');
+
+      const stopBtn = (r.status === 'recording')
+        ? `<button class="btn-danger" onclick="stopRecording('${r.id}')">Stop</button>`
+        : '';
+
+      const dlBtn = r.downloadable
+        ? `<button class="btn-download" onclick="downloadRecording('${r.id}')">Download</button>`
+        : '';
+
+      return `
+        <div class="recording-item status-${r.status}">
+          <div class="recording-info">
+            <div class="recording-url" title="${r.url}">${r.url}</div>
+            <div class="recording-meta">${meta}</div>
+          </div>
+          <span class="badge ${badgeClass}">
+            <span class="badge-dot"></span>${label}
+          </span>
+          <div class="recording-actions">${stopBtn}${dlBtn}</div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── API calls ─────────────────────────────────────────────────────────────
+
+  async function fetchRecordings() {
+    try {
+      const r = await fetch('/api/recordings');
+      recordings = await r.json();
+      render();
+    } catch {
+      // silently ignore — will retry
+    }
+  }
+
+  async function stopRecording(id) {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/recordings/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const { error } = await r.json();
+        alert(error);
+      }
+      await fetchRecordings();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function downloadRecording(id) {
+    window.location.href = `/api/recordings/${id}/download`;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearError();
+
+    const url = urlInput.value.trim();
+    const duration = durationInput.value.trim();
+    if (!url) { showError('URL is required.'); return; }
+
+    startBtn.disabled = true;
+    startBtn.textContent = 'Starting…';
+
+    try {
+      const body = { url };
+      if (duration) body.duration = duration;
+
+      const r = await fetch('/api/recordings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await r.json();
+      if (!r.ok) { showError(data.error || 'Failed to start recording.'); return; }
+
+      urlInput.value = '';
+      durationInput.value = '';
+      await fetchRecordings();
+    } catch (err) {
+      showError('Network error. Is the server running?');
+    } finally {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Start recording';
+    }
+  });
+
+  // ── Polling ───────────────────────────────────────────────────────────────
+
+  function startPolling() {
+    fetchRecordings();
+    refreshTimer = setInterval(fetchRecordings, 2500);
+  }
+
+  startPolling();
+</script>
+</body>
+</html>
