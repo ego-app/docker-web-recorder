@@ -5,6 +5,7 @@ const Docker = require('dockerode');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+const { Writable } = require('stream');
 
 const app = express();
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
@@ -20,6 +21,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // In-memory job store — resets on container restart
 const jobs = new Map();
+// SSE clients per job: jobId -> Set<res>
+const jobSseClients = new Map();
+
+function broadcastToJob(jobId, data) {
+  const clients = jobSseClients.get(jobId);
+  if (!clients || clients.size === 0) return;
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of clients) res.write(msg);
+}
+
+function closeJobSse(jobId) {
+  const clients = jobSseClients.get(jobId);
+  if (!clients) return;
+  for (const res of clients) {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    res.end();
+  }
+  clients.clear();
+}
 
 function jobView(job) {
   const filePath = path.join(RECORDINGS_DIR, job.output);
@@ -30,9 +50,55 @@ function jobView(job) {
     output: job.output,
     status: job.status,
     startedAt: job.startedAt,
+    ffmpegStartedAt: job.ffmpegStartedAt,
     completedAt: job.completedAt,
     downloadable: job.status === 'completed' && fs.existsSync(filePath),
   };
+}
+
+// Creates a Writable that buffers incomplete lines and calls onLine for each complete line
+function makeLineWriter(onLine) {
+  let pending = '';
+  return new Writable({
+    write(chunk, _enc, cb) {
+      pending += chunk.toString();
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (line) onLine(line);
+      }
+      cb();
+    },
+    final(cb) {
+      if (pending.trim()) onLine(pending.trim());
+      cb();
+    },
+  });
+}
+
+function streamContainerLogs(container, job) {
+  container
+    .logs({ follow: true, stdout: true, stderr: true, timestamps: false })
+    .then((logStream) => {
+      function onLine(line) {
+        job.logs.push(line);
+        if (job.logs.length > 300) job.logs.shift();
+
+        if (!job.ffmpegStartedAt && line.includes('Starting FFmpeg')) {
+          job.ffmpegStartedAt = new Date().toISOString();
+          broadcastToJob(job.id, { type: 'ffmpegStarted', timestamp: job.ffmpegStartedAt });
+        }
+
+        broadcastToJob(job.id, { type: 'log', line });
+      }
+
+      const writer = makeLineWriter(onLine);
+      docker.modem.demuxStream(logStream, writer, writer);
+    })
+    .catch(() => {
+      /* container may have already exited */
+    });
 }
 
 // List all recordings
@@ -81,25 +147,34 @@ app.post('/api/recordings', async (req, res) => {
     containerId: container.id,
     status: 'recording',
     startedAt: new Date().toISOString(),
+    ffmpegStartedAt: null,
     completedAt: null,
+    logs: [],
   };
   jobs.set(id, job);
 
+  streamContainerLogs(container, job);
+
   // Watch for container exit in the background
-  container.wait().then(({ StatusCode }) => {
-    const j = jobs.get(id);
-    if (!j || j.status === 'completed' || j.status === 'failed') return;
-    // Treat graceful stop (SIGTERM) or clean exit as completed
-    const graceful = j.status === 'stopping' || StatusCode === 0 || StatusCode === null;
-    j.status = graceful ? 'completed' : 'failed';
-    j.completedAt = new Date().toISOString();
-  }).catch(() => {
-    const j = jobs.get(id);
-    if (j && (j.status === 'recording' || j.status === 'stopping')) {
-      j.status = 'failed';
+  container
+    .wait()
+    .then(({ StatusCode }) => {
+      const j = jobs.get(id);
+      if (!j || j.status === 'completed' || j.status === 'failed') return;
+      // Treat graceful stop (SIGTERM) or clean exit as completed
+      const graceful = j.status === 'stopping' || StatusCode === 0 || StatusCode === null;
+      j.status = graceful ? 'completed' : 'failed';
       j.completedAt = new Date().toISOString();
-    }
-  });
+      closeJobSse(id);
+    })
+    .catch(() => {
+      const j = jobs.get(id);
+      if (j && (j.status === 'recording' || j.status === 'stopping')) {
+        j.status = 'failed';
+        j.completedAt = new Date().toISOString();
+        closeJobSse(id);
+      }
+    });
 
   res.status(201).json(jobView(job));
 });
@@ -139,6 +214,45 @@ app.get('/api/recordings/:id/download', (req, res) => {
   res.download(filePath, `recording-${job.id.slice(0, 8)}.mp4`);
 });
 
+// SSE endpoint: stream container logs in real time
+app.get('/api/recordings/:id/logs', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Recording not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Send all buffered log lines first
+  for (const line of job.logs) {
+    res.write(`data: ${JSON.stringify({ type: 'log', line })}\n\n`);
+  }
+
+  // Inform client if FFmpeg has already started
+  if (job.ffmpegStartedAt) {
+    res.write(
+      `data: ${JSON.stringify({ type: 'ffmpegStarted', timestamp: job.ffmpegStartedAt })}\n\n`,
+    );
+  }
+
+  // If the job is already finished, close immediately
+  if (job.status === 'completed' || job.status === 'failed') {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Register this response as a live SSE client
+  if (!jobSseClients.has(job.id)) jobSseClients.set(job.id, new Set());
+  jobSseClients.get(job.id).add(res);
+
+  req.on('close', () => {
+    const clients = jobSseClients.get(job.id);
+    if (clients) clients.delete(res);
+  });
+});
+
 app.listen(3000, () => {
   console.log('Web Recorder UI listening on http://localhost:3000');
   console.log(`Recorder image : ${RECORDER_IMAGE}`);
@@ -146,4 +260,15 @@ app.listen(3000, () => {
   if (RECORDINGS_VOLUME_NAME) {
     console.log(`Volume name    : ${RECORDINGS_VOLUME_NAME}`);
   }
+
+  // Check if recordings directory is writable
+  fs.access(RECORDINGS_DIR, fs.constants.W_OK, (err) => {
+    if (err) {
+      console.error(
+        `Error: Recordings directory "${RECORDINGS_DIR}" is not writable. Please ensure it exists and has the correct permissions.`,
+      );
+    } else {
+      console.log(`Recordings directory "${RECORDINGS_DIR}" is writable.`);
+    }
+  });
 });

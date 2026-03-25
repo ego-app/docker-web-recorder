@@ -166,6 +166,17 @@
       background: rgba(34, 197, 94, 0.22);
     }
 
+    .btn-logs {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-logs:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.09);
+      color: var(--text);
+    }
+
     #form-error {
       margin-top: 12px;
       font-size: 13px;
@@ -200,30 +211,25 @@
       gap: 10px;
     }
 
-    .recording-item {
-      background: var(--surface);
+    /* Wrapper handles border, border-radius, and the colored left stripe */
+    .recording-wrapper {
       border: 1px solid var(--border);
       border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .recording-wrapper.status-starting { border-left: 3px solid #555; }
+    .recording-wrapper.status-recording { border-left: 3px solid var(--blue); }
+    .recording-wrapper.status-stopping  { border-left: 3px solid var(--amber); }
+    .recording-wrapper.status-completed { border-left: 3px solid var(--green); }
+    .recording-wrapper.status-failed    { border-left: 3px solid var(--red); }
+
+    .recording-item {
+      background: var(--surface);
       padding: 16px 18px;
       display: flex;
       align-items: center;
       gap: 14px;
-    }
-
-    .recording-item.status-recording {
-      border-left: 3px solid var(--blue);
-    }
-
-    .recording-item.status-stopping {
-      border-left: 3px solid var(--amber);
-    }
-
-    .recording-item.status-completed {
-      border-left: 3px solid var(--green);
-    }
-
-    .recording-item.status-failed {
-      border-left: 3px solid var(--red);
     }
 
     .recording-info {
@@ -267,11 +273,20 @@
       border-radius: 50%;
     }
 
+    /* "starting" = preparing environment, FFmpeg not yet running */
+    .badge-starting {
+      background: rgba(128, 128, 128, 0.15);
+      color: #888;
+    }
+    .badge-starting .badge-dot {
+      background: #666;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
     .badge-recording {
       background: rgba(59, 130, 246, 0.15);
       color: var(--blue);
     }
-
     .badge-recording .badge-dot {
       background: var(--blue);
       animation: pulse 1.4s ease-in-out infinite;
@@ -281,21 +296,18 @@
       background: rgba(245, 158, 11, 0.15);
       color: var(--amber);
     }
-
     .badge-stopping .badge-dot { background: var(--amber); }
 
     .badge-completed {
       background: rgba(34, 197, 94, 0.12);
       color: var(--green);
     }
-
     .badge-completed .badge-dot { background: var(--green); }
 
     .badge-failed {
       background: rgba(239, 68, 68, 0.12);
       color: var(--red);
     }
-
     .badge-failed .badge-dot { background: var(--red); }
 
     @keyframes pulse {
@@ -309,6 +321,38 @@
       flex-shrink: 0;
     }
 
+    /* --- Log panel --- */
+    .log-panel {
+      display: none;
+      border-top: 1px solid var(--border);
+      background: #0a0a0a;
+    }
+
+    .log-output {
+      font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.7;
+      color: #999;
+      padding: 12px 16px;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .log-line { }
+
+    .log-line.highlight {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    .log-empty {
+      color: #444;
+      font-style: italic;
+    }
+
+    /* --- Empty state --- */
     .empty-state {
       text-align: center;
       padding: 48px 0;
@@ -376,7 +420,20 @@
   let recordings = [];
   let refreshTimer = null;
 
+  // Per-job UI state preserved across re-renders
+  const expandedLogs = new Set();   // job IDs with log panel open
+  const eventSources = new Map();   // jobId -> EventSource
+  const jobLogs = new Map();        // jobId -> string[]
+
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  function escHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
   function fmt(iso) {
     if (!iso) return '—';
@@ -418,15 +475,43 @@
       return;
     }
 
+    // Save scroll positions of open log panels before blowing away the DOM
+    const scrollPositions = {};
+    for (const id of expandedLogs) {
+      const el = document.getElementById(`log-output-${id}`);
+      if (el) scrollPositions[id] = el.scrollTop;
+    }
+
     list.innerHTML = recordings.map(r => {
-      const badgeClass = `badge-${r.status}`;
-      const label = r.status === 'stopping' ? 'stopping' : r.status;
+      // "starting" = container running but FFmpeg not yet active
+      const effectiveStatus =
+        (r.status === 'recording' && !r.ffmpegStartedAt) ? 'starting' : r.status;
+
+      const badgeLabel = effectiveStatus === 'starting' ? 'Starting' :
+                         effectiveStatus === 'stopping' ? 'Stopping' : effectiveStatus;
+
+      // Meta timing line
+      let timeInfo;
+      if (r.status === 'recording') {
+        if (r.ffmpegStartedAt) {
+          timeInfo = `${elapsed(r.ffmpegStartedAt)} recording`;
+        } else {
+          timeInfo = 'Preparing environment\u2026';
+        }
+      } else if (r.status === 'stopping') {
+        timeInfo = r.ffmpegStartedAt
+          ? `${elapsed(r.ffmpegStartedAt)} \u00b7 Finalizing\u2026`
+          : 'Finalizing\u2026';
+      } else if (r.completedAt) {
+        const from = r.ffmpegStartedAt || r.startedAt;
+        timeInfo = `${elapsed(from, r.completedAt)} recorded`;
+      } else {
+        timeInfo = `${elapsed(r.startedAt)} elapsed`;
+      }
 
       const meta = [
         `Started ${fmt(r.startedAt)}`,
-        r.completedAt
-          ? `Completed ${fmt(r.completedAt)} &middot; ${elapsed(r.startedAt, r.completedAt)}`
-          : `${elapsed(r.startedAt)} elapsed`,
+        timeInfo,
         r.duration ? `Limit: ${r.duration}s` : null,
       ].filter(Boolean).join(' &nbsp;&middot;&nbsp; ');
 
@@ -438,18 +523,130 @@
         ? `<button class="btn-download" onclick="downloadRecording('${r.id}')">Download</button>`
         : '';
 
+      const logsOpen = expandedLogs.has(r.id);
+      const logsBtn = `<button class="btn-logs" id="btn-logs-${r.id}" onclick="toggleLogs('${r.id}')">${logsOpen ? 'Logs &#9652;' : 'Logs &#9662;'}</button>`;
+
       return `
-        <div class="recording-item status-${r.status}">
-          <div class="recording-info">
-            <div class="recording-url" title="${r.url}">${r.url}</div>
-            <div class="recording-meta">${meta}</div>
+        <div class="recording-wrapper status-${effectiveStatus}" id="wrapper-${r.id}">
+          <div class="recording-item">
+            <div class="recording-info">
+              <div class="recording-url" title="${escHtml(r.url)}">${escHtml(r.url)}</div>
+              <div class="recording-meta">${meta}</div>
+            </div>
+            <span class="badge badge-${effectiveStatus}">
+              <span class="badge-dot"></span>${badgeLabel}
+            </span>
+            <div class="recording-actions">${stopBtn}${dlBtn}${logsBtn}</div>
           </div>
-          <span class="badge ${badgeClass}">
-            <span class="badge-dot"></span>${label}
-          </span>
-          <div class="recording-actions">${stopBtn}${dlBtn}</div>
+          <div class="log-panel" id="logs-${r.id}">
+            <div class="log-output" id="log-output-${r.id}"></div>
+          </div>
         </div>`;
     }).join('');
+
+    // Restore expanded log panels
+    for (const id of expandedLogs) {
+      const panel = document.getElementById(`logs-${id}`);
+      const output = document.getElementById(`log-output-${id}`);
+      if (!panel || !output) continue;
+
+      panel.style.display = 'block';
+      renderLogs(id, output);
+
+      // Restore scroll position (or stay at bottom if it was there)
+      const prevScroll = scrollPositions[id];
+      const atBottom = prevScroll === undefined ||
+        prevScroll >= output.scrollHeight - output.clientHeight - 20;
+      output.scrollTop = atBottom ? output.scrollHeight : prevScroll;
+    }
+  }
+
+  function renderLogs(jobId, outputEl) {
+    const lines = jobLogs.get(jobId) || [];
+    if (lines.length === 0) {
+      outputEl.innerHTML = '<div class="log-empty">No output yet…</div>';
+      return;
+    }
+    outputEl.innerHTML = lines.map(line => {
+      const cls = line.includes('Starting FFmpeg') ? ' highlight' : '';
+      return `<div class="log-line${cls}">${escHtml(line)}</div>`;
+    }).join('');
+  }
+
+  // ── Log panel toggle & SSE ────────────────────────────────────────────────
+
+  function toggleLogs(id) {
+    const panel = document.getElementById(`logs-${id}`);
+    const btn = document.getElementById(`btn-logs-${id}`);
+    if (!panel) return;
+
+    if (expandedLogs.has(id)) {
+      expandedLogs.delete(id);
+      panel.style.display = 'none';
+      if (btn) btn.innerHTML = 'Logs &#9662;';
+    } else {
+      expandedLogs.add(id);
+      panel.style.display = 'block';
+      if (btn) btn.innerHTML = 'Logs &#9652;';
+
+      const output = document.getElementById(`log-output-${id}`);
+      if (output) {
+        renderLogs(id, output);
+        output.scrollTop = output.scrollHeight;
+      }
+
+      connectLogs(id);
+    }
+  }
+
+  function connectLogs(jobId) {
+    // Don't open a second EventSource for the same job
+    if (eventSources.has(jobId)) return;
+
+    const es = new EventSource(`/api/recordings/${jobId}/logs`);
+    eventSources.set(jobId, es);
+
+    es.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === 'log') {
+        if (!jobLogs.has(jobId)) jobLogs.set(jobId, []);
+        jobLogs.get(jobId).push(msg.line);
+
+        // Append directly to DOM if panel is open (avoid full re-render)
+        const output = document.getElementById(`log-output-${jobId}`);
+        if (output && expandedLogs.has(jobId)) {
+          // Remove "no output" placeholder if present
+          const empty = output.querySelector('.log-empty');
+          if (empty) empty.remove();
+
+          const atBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 20;
+          const div = document.createElement('div');
+          div.className = 'log-line' + (msg.line.includes('Starting FFmpeg') ? ' highlight' : '');
+          div.textContent = msg.line;
+          output.appendChild(div);
+          if (atBottom) output.scrollTop = output.scrollHeight;
+        }
+      } else if (msg.type === 'ffmpegStarted') {
+        // Update recording state immediately — don't wait for the next poll
+        const rec = recordings.find(r => r.id === jobId);
+        if (rec && !rec.ffmpegStartedAt) {
+          rec.ffmpegStartedAt = msg.timestamp;
+          render();
+        }
+      } else if (msg.type === 'done') {
+        es.close();
+        eventSources.delete(jobId);
+        // Final poll to pick up completed/failed status
+        fetchRecordings();
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSources.delete(jobId);
+    };
   }
 
   // ── API calls ─────────────────────────────────────────────────────────────
@@ -492,7 +689,7 @@
     if (!url) { showError('URL is required.'); return; }
 
     startBtn.disabled = true;
-    startBtn.textContent = 'Starting…';
+    startBtn.textContent = 'Starting\u2026';
 
     try {
       const body = { url };
