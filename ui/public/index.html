@@ -636,7 +636,7 @@ createApp({
     async function startRecording() {
       formError.value = '';
       const url = newUrl.value.trim();
-      const duration = newDuration.value.trim();
+      const duration = newDuration.value;
       if (!url) { formError.value = 'URL obbligatorio.'; return; }
 
       submitting.value = true;
