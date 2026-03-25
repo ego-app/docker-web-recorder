@@ -99,10 +99,7 @@ async function main() {
     ...exporter.getFFmpegOutputParams().split(/\s+/).filter(Boolean),
   ]
 
-  console.log(`Starting FFmpeg with args: ${ffmpegArgs.join(' ')}`)
-  const ffmpeg = spawn('ffmpeg', ffmpegArgs)
-
-  let stoppingGracefully = false
+  let ffmpeg: ReturnType<typeof spawn>
 
   const forwardSignal = (signal: NodeJS.Signals | number) => {
     console.log(`Received signal ${signal}, stopping gracefully...`)
@@ -114,6 +111,11 @@ async function main() {
   process.on('SIGINT', forwardSignal)
   process.on('SIGTERM', forwardSignal)
   process.on('SIGQUIT', forwardSignal)
+
+  console.log(`Starting FFmpeg with args: ${ffmpegArgs.join(' ')}`)
+  ffmpeg = spawn('ffmpeg', ffmpegArgs)
+
+  let stoppingGracefully = false
 
   await new Promise((resolve, reject) => {
     ffmpeg.on('exit', async (code) => {
