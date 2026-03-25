@@ -1,0 +1,27 @@
+# Sets the compose project name so the recordings volume name is predictable:
+# "web-recorder_recordings" — this is passed to spawned recorder containers.
+name: web-recorder
+
+services:
+  ui:
+    build: ./ui
+    ports:
+      - "3000:3000"
+    volumes:
+      # Docker socket — required to spawn recorder containers on demand
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared recordings volume mounted into this container for serving downloads
+      - recordings:/recordings
+    environment:
+      - RECORDINGS_DIR=/recordings
+      # The named volume passed to spawned recorder containers so they write
+      # to the same volume. Must match: <compose-project-name>_<volume-name>
+      - RECORDINGS_VOLUME_NAME=web-recorder_recordings
+      # Override RECORDER_IMAGE to use a locally built image:
+      #   docker build -t my-recorder:latest .
+      #   RECORDER_IMAGE=my-recorder:latest docker compose up
+      - RECORDER_IMAGE=${RECORDER_IMAGE:-digiz3d/web-recorder:latest}
+    restart: unless-stopped
+
+volumes:
+  recordings:
