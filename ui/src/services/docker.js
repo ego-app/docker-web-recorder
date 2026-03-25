@@ -42,6 +42,7 @@ function watchContainer(container, job) {
 			j.status = graceful ? 'completed' : 'failed';
 			j.completedAt = new Date().toISOString();
 			closeJobSse(job.id);
+			container.remove().catch(() => { /* already removed */ });
 		})
 		.catch(() => {
 			const j = jobs.get(job.id);
@@ -50,6 +51,7 @@ function watchContainer(container, job) {
 				j.completedAt = new Date().toISOString();
 				closeJobSse(job.id);
 			}
+			container.remove().catch(() => { /* already removed */ });
 		});
 }
 
