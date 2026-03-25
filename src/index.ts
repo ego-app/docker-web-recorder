@@ -102,6 +102,7 @@ async function main() {
   let stoppingGracefully = false
 
   const forwardSignal = (signal: NodeJS.Signals | number) => {
+    console.log(`Received signal ${signal}, stopping gracefully...`)
     stoppingGracefully = true
     ffmpeg.kill(signal)
   }
